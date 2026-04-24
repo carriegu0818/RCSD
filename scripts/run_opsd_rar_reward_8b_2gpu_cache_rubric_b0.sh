@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=opsd-reward
-#SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-reward-gt-b0.out
-#SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-reward-gt-b0.err
+#SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-reward-cache-b0.out
+#SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-reward-cache-b0.err
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2         # request 2 GPUs
@@ -10,7 +10,7 @@
 #SBATCH --time=48:00:00
 #SBATCH --exclude=r4513u10n01,r4513u20n01,r4513u30n01,r4516u01n01,r4518u01n01,r4518u09n01,r4518u05n01,r4507u05n01
 
-
+set -e
 source /gpfs/radev/pi/ying_rex/sg2768/miniconda3/etc/profile.d/conda.sh
 
 conda activate opsd
@@ -55,21 +55,62 @@ echo "==================="
 cd /gpfs/radev/pi/ying_rex/sg2768/OPSD
 
 DATA_SOURCE="${DATA_SOURCE:-rar_science}"
-RUBRIC_SOURCE="${RUBRIC_SOURCE:-gt}"
+RUBRIC_SOURCE="${RUBRIC_SOURCE:-cache}"
 RUN_TAG="${DATA_SOURCE//-/_}_${RUBRIC_SOURCE//-/_}"
-RUN_CONFIG="qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_${RUN_TAG}_v2"
-RUBRIC_CACHE_DIR="/gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/rubric_cache/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/${RUN_TAG}"
+RUN_CONFIG="qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_${RUN_TAG}"
+RUBRIC_CACHE_DIR="/gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/rubric_cache/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096_rar"
 
 echo "DATA_SOURCE=${DATA_SOURCE}"
 echo "RUBRIC_SOURCE=${RUBRIC_SOURCE}"
 echo "RUN_CONFIG=${RUN_CONFIG}"
+
+
+# 1) Generate rubrics (2 GPUs, distributed HF generate)
+accelerate launch \
+    --config_file accelerate.yaml \
+    --num_processes 2 \
+    --main_process_port 12999 \
+    opsd_train_reward.py \
+    --model_name_or_path Qwen/Qwen3-8B \
+    --learning_rate 5e-6 \
+    --per_device_train_batch_size 1 \
+    --gradient_checkpointing \
+    --gradient_accumulation_steps 16 \
+    --output_dir  /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs \
+    --run_config "${RUN_CONFIG}" \
+    --num_train_epochs 3 \
+    --max_completion_length 4096 \
+    --save_steps 50 \
+    --logging_steps 2 \
+    --attn_implementation flash_attention_2 \
+    --torch_dtype bfloat16 \
+    --max_length 20000 \
+    --beta 0.5 \
+    --use_peft \
+    --lora_r 64 \
+    --lora_alpha 128 \
+    --lora_target_modules q_proj k_proj v_proj o_proj gate_proj up_proj down_proj \
+    --temperature 1.2 \
+    --top_p 0.95 \
+    --top_k 20 \
+    --data_source "${DATA_SOURCE}" \
+    --rubric_model_path /gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/checkpoint-1000 \
+    --rubric_cache_dir "${RUBRIC_CACHE_DIR}" \
+    --rubric_sample_size 10000 \
+    --rubric_max_new_tokens 2048 \
+    --rubric_batch_size 64 \
+    --rubric_distributed \
+    --rubric_only \
+    --fixed_teacher \
+    --wandb_entity sgu33-stanford-university \
+    --wandb_project OPSD
 
 # 2) Train using the selected dataset/rubric source (multi-GPU)
 accelerate launch \
     --config_file accelerate.yaml \
     --num_processes 2 \
     --gradient_accumulation_steps 16 \
-    --main_process_port 18949 \
+    --main_process_port 14949 \
     opsd_train_reward.py \
     --model_name_or_path Qwen/Qwen3-8B \
     --learning_rate 5e-6 \

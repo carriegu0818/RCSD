@@ -57,7 +57,7 @@ cd /gpfs/radev/pi/ying_rex/sg2768/OPSD
 DATA_SOURCE="${DATA_SOURCE:-rar_science}"
 RUBRIC_SOURCE="${RUBRIC_SOURCE:-gt}"
 RUN_TAG="${DATA_SOURCE//-/_}_${RUBRIC_SOURCE//-/_}"
-RUN_CONFIG="qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_${RUN_TAG}_v2"
+RUN_CONFIG="qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b1_${RUN_TAG}_v2"
 RUBRIC_CACHE_DIR="/gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/rubric_cache/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/${RUN_TAG}"
 
 echo "DATA_SOURCE=${DATA_SOURCE}"
@@ -69,7 +69,7 @@ accelerate launch \
     --config_file accelerate.yaml \
     --num_processes 2 \
     --gradient_accumulation_steps 16 \
-    --main_process_port 18949 \
+    --main_process_port 21949 \
     opsd_train_reward.py \
     --model_name_or_path Qwen/Qwen3-8B \
     --learning_rate 5e-6 \
@@ -85,7 +85,7 @@ accelerate launch \
     --attn_implementation flash_attention_2 \
     --torch_dtype bfloat16 \
     --max_length 25000 \
-    --beta 0 \
+    --beta 1 \
     --use_vllm \
     --vllm_mode colocate \
     --vllm_gpu_memory_utilization 0.6 \

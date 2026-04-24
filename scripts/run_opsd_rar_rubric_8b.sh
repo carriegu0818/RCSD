@@ -34,6 +34,8 @@ export TORCHINDUCTOR_CACHE_DIR=/gpfs/radev/pi/ying_rex/sg2768/.cache/torch/induc
 
 module load GCC/12.2.0
 
+# resume_args=()
+resume_args=(--resume_from_checkpoint /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_rubricgen_fixteacher_lr5e6_gen4096/checkpoint-100)
 
 cd /gpfs/radev/pi/ying_rex/sg2768/OPSD
 
@@ -52,7 +54,7 @@ accelerate launch \
     --run_config qwen3_8b_rubricgen_fixteacher_lr5e6_gen4096 \
     --num_train_epochs 3 \
     --max_completion_length 4096 \
-    --save_steps 50 \
+    --save_steps 20 \
     --logging_steps 2 \
     --attn_implementation flash_attention_2 \
     --torch_dtype bfloat16 \
@@ -72,6 +74,7 @@ accelerate launch \
     --teacher_prompt_tag rubric \
     --fixed_teacher \
     --wandb_entity sgu33-stanford-university \
-    --wandb_project OPSD
+    --wandb_project OPSD \
+    "${resume_args[@]}"
     
 #--teacher_prompt_tag rubric reference_answer \
