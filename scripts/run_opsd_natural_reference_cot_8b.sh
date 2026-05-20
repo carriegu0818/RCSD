@@ -76,8 +76,6 @@ accelerate launch \
     --num_train_epochs 3 \
     --max_completion_length 4096 \
     --save_steps 10 \
-    --gpqa_eval_interval "${GPQA_EVAL_INTERVAL}" \
-    --gpqa_eval_size "${GPQA_EVAL_SIZE}" \
     --logging_steps 2 \
     --attn_implementation flash_attention_2 \
     --torch_dtype bfloat16 \

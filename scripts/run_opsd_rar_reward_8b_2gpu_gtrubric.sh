@@ -86,6 +86,7 @@ accelerate launch \
     --torch_dtype bfloat16 \
     --max_length 25000 \
     --beta 0.5 \
+    --use_peft \
     --use_vllm \
     --vllm_mode colocate \
     --vllm_gpu_memory_utilization 0.6 \
@@ -102,6 +103,7 @@ accelerate launch \
     --rubric_distributed \
     --jsd_token_clip 0.05 \
     --reason_first \
+    --fixed_teacher \
     --wandb_entity sgu33-stanford-university \
     --wandb_project OPSD
     

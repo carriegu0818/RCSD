@@ -100,10 +100,6 @@ class CustomScriptArguments(ScriptArguments):
             "If omitted, defaults to rubric mode for all examples."
         },
     )
-    resume_from_checkpoint: Optional[str] = field(
-        default=None,
-        metadata={"help": "Path to a Trainer/DeepSpeed checkpoint directory to resume from."},
-    )
 
 
 if __name__ == "__main__":
@@ -336,6 +332,6 @@ if __name__ == "__main__":
         completions_callback = LogCompletionsCallback(trainer, generation_config, num_prompts=8)
         trainer.add_callback(completions_callback)
 
-    trainer.train(resume_from_checkpoint=script_args.resume_from_checkpoint)
+    trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
 
     trainer.save_model(training_args.output_dir)

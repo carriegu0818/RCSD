@@ -58,24 +58,24 @@ DATA_SOURCE="${DATA_SOURCE:-rar_science}"
 RUBRIC_SOURCE="${RUBRIC_SOURCE:-cache}"
 RUN_TAG="${DATA_SOURCE//-/_}_${RUBRIC_SOURCE//-/_}"
 RUN_CONFIG="qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_${RUN_TAG}"
-RUBRIC_CACHE_DIR="/gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/rubric_cache/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096_rar"
+RUBRIC_CACHE_DIR="/gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/rubric_cache/qwen3_8b_rubricgen_fixteacher_lr5e6_gen4096"
 
 echo "DATA_SOURCE=${DATA_SOURCE}"
 echo "RUBRIC_SOURCE=${RUBRIC_SOURCE}"
 echo "RUN_CONFIG=${RUN_CONFIG}"
 
 
-# 1) Generate rubrics (2 GPUs, distributed HF generate)
+# # 1) Generate rubrics (2 GPUs, distributed HF generate)
 accelerate launch \
     --config_file accelerate.yaml \
     --num_processes 2 \
-    --main_process_port 12999 \
+    --main_process_port 12991 \
     opsd_train_reward.py \
     --model_name_or_path Qwen/Qwen3-8B \
     --learning_rate 5e-6 \
     --per_device_train_batch_size 1 \
     --gradient_checkpointing \
-    --gradient_accumulation_steps 16 \
+    --gradient_accumulation_steps 8 \
     --output_dir  /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs \
     --run_config "${RUN_CONFIG}" \
     --num_train_epochs 3 \
@@ -90,15 +90,15 @@ accelerate launch \
     --lora_r 64 \
     --lora_alpha 128 \
     --lora_target_modules q_proj k_proj v_proj o_proj gate_proj up_proj down_proj \
-    --temperature 1.2 \
+    --temperature 1.0 \
     --top_p 0.95 \
     --top_k 20 \
     --data_source "${DATA_SOURCE}" \
-    --rubric_model_path /gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/checkpoint-1000 \
+    --rubric_model_path /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_rubricgen_fixteacher_lr5e6_gen4096/checkpoint-500 \
     --rubric_cache_dir "${RUBRIC_CACHE_DIR}" \
     --rubric_sample_size 10000 \
     --rubric_max_new_tokens 2048 \
-    --rubric_batch_size 64 \
+    --rubric_batch_size 32 \
     --rubric_distributed \
     --rubric_only \
     --fixed_teacher \
@@ -127,6 +127,7 @@ accelerate launch \
     --torch_dtype bfloat16 \
     --max_length 25000 \
     --beta 0 \
+    --use_peft \
     --use_vllm \
     --vllm_mode colocate \
     --vllm_gpu_memory_utilization 0.6 \
@@ -136,13 +137,14 @@ accelerate launch \
     --top_k 20 \
     --data_source "${DATA_SOURCE}" \
     --rubric_source "${RUBRIC_SOURCE}" \
-    --rubric_model_path /gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/checkpoint-1000 \
+    --rubric_model_path /gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/qwen3_8b_rubricgen_fixteacher_lr5e6_gen4096/checkpoint-500 \
     --rubric_cache_dir "${RUBRIC_CACHE_DIR}" \
     --rubric_sample_size 10000 \
     --rubric_max_new_tokens 1024 \
     --rubric_distributed \
     --jsd_token_clip 0.05 \
     --reason_first \
+    --fixed_teacher \
     --wandb_entity sgu33-stanford-university \
     --wandb_project OPSD
     
