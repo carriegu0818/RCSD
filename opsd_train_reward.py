@@ -23,10 +23,8 @@ from accelerate import PartialState
 
 try:
     from peft import PeftModel
-    from peft import AutoPeftModelForCausalLM
 except Exception:
     PeftModel = None
-    AutoPeftModelForCausalLM = None
 
 # Enable logging in a Hugging Face Space
 os.environ.setdefault("TRACKIO_SPACE_ID", "trl-trackio")
@@ -96,6 +94,15 @@ def _normalize_text(value):
     return str(value)
 
 
+def _normalize_optional_string(value):
+    if value is None:
+        return None
+    value = str(value).strip()
+    if not value or value.lower() in {"none", "null"}:
+        return None
+    return value
+
+
 def _extract_json_array(text: str) -> str:
     if text is None:
         return ""
@@ -160,11 +167,53 @@ def _load_training_dataset(data_source: str):
     return dataset["train"]
 
 
+GENERIC_RUBRIC = [
+    {
+        "title": "Understand Problem",
+        "description": "Understand the problem: Identify what is being asked and restate the goal clearly.",
+        "weight": 1,
+    },
+    {
+        "title": "Identify Information",
+        "description": "Identify relevant information: Extract the important facts, quantities, constraints, definitions, and assumptions from the problem.",
+        "weight": 1,
+    },
+    {
+        "title": "Choose Strategy",
+        "description": "Choose an appropriate solution strategy: Select a valid method, principle, formula, or reasoning approach for solving the problem.",
+        "weight": 1,
+    },
+    {
+        "title": "Execute Reasoning",
+        "description": "Execute the reasoning carefully: Carry out the solution step by step, ensuring that each step follows logically from the previous one.",
+        "weight": 1,
+    },
+    {
+        "title": "Check Correctness",
+        "description": "Check correctness and consistency: Verify calculations, units, assumptions, edge cases, and whether the answer satisfies the original question.",
+        "weight": 1,
+    },
+    {
+        "title": "Provide Final Answer",
+        "description": "Provide the final answer clearly: State the final answer in a concise and unambiguous form.",
+        "weight": 1,
+    },
+]
+
+
+GENERIC_RUBRIC_TEXT = json.dumps(GENERIC_RUBRIC, ensure_ascii=False)
+
+
 def _use_ground_truth_rubric(example):
     rubric_list = example.get("rubric_list")
     if rubric_list is None:
         raise ValueError("rubric_source='gt' requires a 'rubric_list' column in the dataset.")
     example["rubric"] = _normalize_text(rubric_list)
+    return example
+
+
+def _use_generic_rubric(example):
+    example["rubric"] = GENERIC_RUBRIC_TEXT
     return example
 
 
@@ -285,6 +334,7 @@ def _build_rubric_prompts(batch, prompt_builder, tokenizer):
 def generate_rubrics_for_dataset(
     dataset,
     rubric_model_path,
+    rubric_base_model_name_or_path,
     rubric_cache_dir,
     state,
     distributed,
@@ -308,9 +358,6 @@ def generate_rubrics_for_dataset(
 ):
     import torch
 
-    if PeftModel is None:
-        raise ImportError("peft is required to load the rubric LoRA checkpoint.")
-
     device = state.device if state is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
         torch.cuda.set_device(device)
@@ -326,14 +373,25 @@ def generate_rubrics_for_dataset(
     if rubric_tokenizer.pad_token is None:
         rubric_tokenizer.pad_token = rubric_tokenizer.eos_token
 
-    base_model_name = None
     adapter_config_path = os.path.join(rubric_model_path, "adapter_config.json")
+    adapter_config = None
     if os.path.exists(adapter_config_path):
         with open(adapter_config_path, "r", encoding="utf-8") as f:
             adapter_config = json.load(f)
-        base_model_name = adapter_config.get("base_model_name_or_path")
-    if base_model_name is None:
-        raise ValueError("Unable to determine base_model_name_or_path from rubric adapter config.")
+    is_lora_checkpoint = adapter_config is not None
+    base_model_name = rubric_model_path
+    if is_lora_checkpoint:
+        if PeftModel is None:
+            raise ImportError("peft is required to load the rubric LoRA checkpoint.")
+        base_model_name = _normalize_optional_string(rubric_base_model_name_or_path) or _normalize_optional_string(
+            adapter_config.get("base_model_name_or_path")
+        )
+        if base_model_name is None:
+            raise ValueError(
+                "Unable to determine base_model_name_or_path from rubric adapter config. "
+                "Pass --rubric_base_model_name_or_path for LoRA rubric checkpoints whose adapter_config.json "
+                "does not record the base model."
+            )
 
     rubric_model = None
     vllm_engine = None
@@ -350,42 +408,39 @@ def generate_rubrics_for_dataset(
             )
 
         from vllm import LLM, SamplingParams
-        from vllm.lora.request import LoRARequest
         from vllm.sampling_params import GuidedDecodingParams
 
-        with open(adapter_config_path, "r", encoding="utf-8") as f:
-            adapter_config = json.load(f)
-        lora_rank = adapter_config.get("r", 64)
+        if is_lora_checkpoint:
+            from vllm.lora.request import LoRARequest
 
-        vllm_engine = LLM(
-            model=base_model_name,
-            tokenizer=rubric_model_path,
-            trust_remote_code=trust_remote_code,
-            dtype=str(rubric_dtype).replace("torch.", ""),
-            tensor_parallel_size=vllm_tensor_parallel_size,
-            gpu_memory_utilization=vllm_gpu_memory_utilization,
-            enable_lora=True,
-            max_loras=1,
-            max_lora_rank=lora_rank,
-        )
-        vllm_lora_request = LoRARequest(
-            lora_name="rubric",
-            lora_int_id=1,
-            lora_path=rubric_model_path,
-            base_model_name=base_model_name,
-        )
+        vllm_kwargs = {
+            "model": base_model_name,
+            "tokenizer": rubric_model_path,
+            "trust_remote_code": trust_remote_code,
+            "dtype": str(rubric_dtype).replace("torch.", ""),
+            "tensor_parallel_size": vllm_tensor_parallel_size,
+            "gpu_memory_utilization": vllm_gpu_memory_utilization,
+        }
+        if is_lora_checkpoint:
+            lora_rank = adapter_config.get("r", 64)
+            vllm_kwargs.update(
+                {
+                    "enable_lora": True,
+                    "max_loras": 1,
+                    "max_lora_rank": lora_rank,
+                }
+            )
+        vllm_engine = LLM(**vllm_kwargs)
+        if is_lora_checkpoint:
+            vllm_lora_request = LoRARequest(
+                lora_name="rubric",
+                lora_int_id=1,
+                lora_path=rubric_model_path,
+                base_model_name=base_model_name,
+            )
     else:
         with _disable_deepspeed_zero3_init():
-            if AutoPeftModelForCausalLM is not None:
-                rubric_model = AutoPeftModelForCausalLM.from_pretrained(
-                    rubric_model_path,
-                    torch_dtype=rubric_dtype,
-                    trust_remote_code=trust_remote_code,
-                    attn_implementation=attn_implementation or "flash_attention_2",
-                    low_cpu_mem_usage=False,
-                )
-                rubric_model.to(device)
-            else:
+            if is_lora_checkpoint:
                 base_model = AutoModelForCausalLM.from_pretrained(
                     base_model_name,
                     torch_dtype=rubric_dtype,
@@ -394,7 +449,15 @@ def generate_rubrics_for_dataset(
                     low_cpu_mem_usage=False,
                 )
                 rubric_model = PeftModel.from_pretrained(base_model, rubric_model_path)
-                rubric_model.to(device)
+            else:
+                rubric_model = AutoModelForCausalLM.from_pretrained(
+                    rubric_model_path,
+                    torch_dtype=rubric_dtype,
+                    trust_remote_code=trust_remote_code,
+                    attn_implementation=attn_implementation or "flash_attention_2",
+                    low_cpu_mem_usage=False,
+                )
+            rubric_model.to(device)
 
         rubric_model.eval()
 
@@ -425,12 +488,14 @@ def generate_rubrics_for_dataset(
                 max_tokens=rubric_max_new_tokens,
                 guided_decoding=guided_decoding,
             )
-            outputs = vllm_engine.generate(
-                prompt_token_ids=prompt_token_ids,
-                sampling_params=sampling_params,
-                use_tqdm=False,
-                lora_request=vllm_lora_request,
-            )
+            generate_kwargs = {
+                "prompt_token_ids": prompt_token_ids,
+                "sampling_params": sampling_params,
+                "use_tqdm": False,
+            }
+            if vllm_lora_request is not None:
+                generate_kwargs["lora_request"] = vllm_lora_request
+            outputs = vllm_engine.generate(**generate_kwargs)
             decoded = [out.outputs[0].text if out.outputs else "" for out in outputs]
         else:
             tokenized = rubric_tokenizer(
@@ -545,7 +610,8 @@ class CustomScriptArguments(ScriptArguments):
     rubric_source: str = field(
         default="cache",
         metadata={
-            "help": "Rubric source. Supported values: cache (generated/cached rubrics), gt (dataset rubric_list)."
+            "help": "Rubric source. Supported values: cache (generated/cached rubrics), "
+            "gt (dataset rubric_list), generic (same general rubric for every example)."
         },
     )
     presence_penalty: float = field(
@@ -594,7 +660,16 @@ class CustomScriptArguments(ScriptArguments):
     )
     rubric_model_path: str = field(
         default="/gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/checkpoint-1000",
-        metadata={"help": "Path to the rubric LoRA checkpoint used to generate rubrics."},
+        metadata={
+            "help": "Path or Hugging Face model id used to generate rubrics. Can be a full model or LoRA checkpoint."
+        },
+    )
+    rubric_base_model_name_or_path: str = field(
+        default=None,
+        metadata={
+            "help": "Optional base model for rubric LoRA checkpoints whose adapter_config.json is missing "
+            "base_model_name_or_path. Ignored when rubric_model_path points to a full model."
+        },
     )
     rubric_cache_dir: str = field(
         default=None,
@@ -670,8 +745,11 @@ if __name__ == "__main__":
         aliases={
             "ground_truth": "gt",
             "groundtruth": "gt",
+            "general": "generic",
+            "generic_rubric": "generic",
+            "general_rubric": "generic",
         },
-        valid_values={"cache", "gt"},
+        valid_values={"cache", "gt", "generic"},
     )
 
     ################
@@ -720,6 +798,9 @@ if __name__ == "__main__":
     print(f"Output Directory: {training_args.output_dir}")
     print(f"Data Source: {script_args.data_source}")
     print(f"Rubric Source: {script_args.rubric_source}")
+    print(f"Rubric Model Path: {script_args.rubric_model_path}")
+    if script_args.rubric_base_model_name_or_path:
+        print(f"Rubric Base Model Override: {script_args.rubric_base_model_name_or_path}")
     print(f"{'='*80}\n")
 
     ################
@@ -758,6 +839,8 @@ if __name__ == "__main__":
                 "fixed_teacher": script_args.fixed_teacher,
                 "data_source": script_args.data_source,
                 "rubric_source": script_args.rubric_source,
+                "rubric_model_path": script_args.rubric_model_path,
+                "rubric_base_model_name_or_path": script_args.rubric_base_model_name_or_path,
                 "top_k_loss": script_args.top_k_loss if script_args.top_k_loss > 0 else None,
                 "use_ema_teacher": script_args.use_ema_teacher,
                 "ema_decay": script_args.ema_decay if script_args.use_ema_teacher else None,
@@ -868,7 +951,14 @@ if __name__ == "__main__":
     if rubric_cache_dir is None:
         rubric_cache_dir = os.path.join(training_args.output_dir, "rubric_cache")
 
-    if script_args.rubric_source == "gt":
+    if script_args.rubric_source == "generic":
+        if state.is_main_process:
+            print("Using the same generic rubric for every example.")
+        train_dataset = train_dataset.map(
+            _use_generic_rubric,
+            desc="Applying generic rubric",
+        )
+    elif script_args.rubric_source == "gt":
         if "rubric_list" not in train_dataset.column_names:
             raise ValueError(
                 f"rubric_source='gt' requires 'rubric_list' in the {script_args.data_source} training dataset."
@@ -889,7 +979,7 @@ if __name__ == "__main__":
             train_dataset = load_from_disk(rubric_cache_dir)
         else:
             if state.is_main_process:
-                print(f"Generating rubrics using checkpoint: {script_args.rubric_model_path}")
+                print(f"Generating rubrics using model/checkpoint: {script_args.rubric_model_path}")
                 if script_args.rubric_distributed and state.num_processes > 1:
                     print(f"Rubric generation will use {state.num_processes} processes (all GPUs).")
                 else:
@@ -900,6 +990,7 @@ if __name__ == "__main__":
                 train_dataset = generate_rubrics_for_dataset(
                     train_dataset,
                     rubric_model_path=script_args.rubric_model_path,
+                    rubric_base_model_name_or_path=script_args.rubric_base_model_name_or_path,
                     rubric_cache_dir=rubric_cache_dir,
                     state=state,
                     distributed=True,
@@ -932,6 +1023,7 @@ if __name__ == "__main__":
                     train_dataset = generate_rubrics_for_dataset(
                         train_dataset,
                         rubric_model_path=script_args.rubric_model_path,
+                        rubric_base_model_name_or_path=script_args.rubric_base_model_name_or_path,
                         rubric_cache_dir=rubric_cache_dir,
                         state=state,
                         distributed=False,
@@ -1031,6 +1123,6 @@ if __name__ == "__main__":
         completions_callback = LogCompletionsCallback(trainer, generation_config, num_prompts=8)
         trainer.add_callback(completions_callback)
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
 
     trainer.save_model(training_args.output_dir)

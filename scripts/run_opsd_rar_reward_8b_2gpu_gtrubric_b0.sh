@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=opsd-reward
-#SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-reward-gt-b0.out
-#SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-reward-gt-b0.err
+#SBATCH --job-name=opsd-continue-b0
+#SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-reward-gt-b0-continue.out
+#SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-reward-gt-b0-continue.err
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2         # request 2 GPUs
@@ -64,12 +64,18 @@ echo "DATA_SOURCE=${DATA_SOURCE}"
 echo "RUBRIC_SOURCE=${RUBRIC_SOURCE}"
 echo "RUN_CONFIG=${RUN_CONFIG}"
 
+
+
+# resume_args=()
+resume_args=(--resume_from_checkpoint /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_v2/checkpoint-120)
+
+
 # 2) Train using the selected dataset/rubric source (multi-GPU)
 accelerate launch \
     --config_file accelerate.yaml \
     --num_processes 2 \
     --gradient_accumulation_steps 16 \
-    --main_process_port 18949 \
+    --main_process_port 18946 \
     opsd_train_reward.py \
     --model_name_or_path Qwen/Qwen3-8B \
     --learning_rate 5e-6 \
