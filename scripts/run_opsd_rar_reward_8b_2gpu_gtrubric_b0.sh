@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=opsd-continue-b0
-#SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-reward-gt-b0-continue.out
-#SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-reward-gt-b0-continue.err
+#SBATCH --job-name=opsd-reward-continue-gt-b0
+#SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j.out
+#SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j.err
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2         # request 2 GPUs
@@ -57,7 +57,7 @@ cd /gpfs/radev/pi/ying_rex/sg2768/OPSD
 DATA_SOURCE="${DATA_SOURCE:-rar_science}"
 RUBRIC_SOURCE="${RUBRIC_SOURCE:-gt}"
 RUN_TAG="${DATA_SOURCE//-/_}_${RUBRIC_SOURCE//-/_}"
-RUN_CONFIG="qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_${RUN_TAG}_v2"
+RUN_CONFIG="qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_${RUN_TAG}_freq2"
 RUBRIC_CACHE_DIR="/gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/rubric_cache/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/${RUN_TAG}"
 
 echo "DATA_SOURCE=${DATA_SOURCE}"
@@ -67,7 +67,7 @@ echo "RUN_CONFIG=${RUN_CONFIG}"
 
 
 # resume_args=()
-resume_args=(--resume_from_checkpoint /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_v2/checkpoint-120)
+resume_args=(--resume_from_checkpoint /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_v2/checkpoint-300)
 
 
 # 2) Train using the selected dataset/rubric source (multi-GPU)
@@ -75,14 +75,14 @@ accelerate launch \
     --config_file accelerate.yaml \
     --num_processes 2 \
     --gradient_accumulation_steps 16 \
-    --main_process_port 18946 \
+    --main_process_port 11231 \
     opsd_train_reward.py \
     --model_name_or_path Qwen/Qwen3-8B \
     --learning_rate 5e-6 \
     --per_device_train_batch_size 1 \
     --gradient_checkpointing \
     --gradient_accumulation_steps 16 \
-    --output_dir  /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs \
+    --output_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs \
     --run_config "${RUN_CONFIG}" \
     --num_train_epochs 3 \
     --max_completion_length 4096 \
@@ -95,6 +95,7 @@ accelerate launch \
     --use_peft \
     --use_vllm \
     --vllm_mode colocate \
+    --vllm_sync_frequency 2 \
     --vllm_gpu_memory_utilization 0.6 \
     --vllm_tensor_parallel_size 1 \
     --temperature 1.2 \
@@ -111,6 +112,8 @@ accelerate launch \
     --reason_first \
     --fixed_teacher \
     --wandb_entity sgu33-stanford-university \
-    --wandb_project OPSD
+    --wandb_project OPSD \
+    "${resume_args[@]}"
+
     
 # #--teacher_prompt_tag rubric reference_answer \

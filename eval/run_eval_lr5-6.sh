@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-eval.out
-#SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-eval.err
+#SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-eval-gt-rubrics.out
+#SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-eval-gt-rubrics.err
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2         # request 4 GPUs
@@ -47,7 +47,7 @@ NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1 python evaluate_math.py \
     --val_n 4 \
     --temperature 1.0 \
     --tensor_parallel_size "$TP_SIZE" \
-    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_rubricref_reasonfirst_fixteacher_ds2_temp12_lr5e6_gen4096_2gpu_v2/checkpoint-60
+    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_v2/checkpoint-100
 wait
 
 # # evaluate base model performance
@@ -57,7 +57,7 @@ NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1 python evaluate_math.py \
     --val_n 4 \
     --temperature 1.0 \
     --tensor_parallel_size "$TP_SIZE" \
-    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_rubricref_reasonfirst_fixteacher_ds2_temp12_lr5e6_gen4096_2gpu_v2/checkpoint-60
+    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_v2/checkpoint-100
 wait
 
 
@@ -68,7 +68,7 @@ NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1 python evaluate_math.py \
     --val_n 4 \
     --temperature 1.0 \
     --tensor_parallel_size "$TP_SIZE" \
-    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_rubricref_reasonfirst_fixteacher_ds2_temp12_lr5e6_gen4096_2gpu_v2/checkpoint-60
+    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_v2/checkpoint-100
 wait
 
 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1 python evaluate_math.py \
@@ -77,5 +77,5 @@ NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1 python evaluate_math.py \
     --val_n 4 \
     --temperature 1.0 \
     --tensor_parallel_size "$TP_SIZE" \
-    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_rubricref_reasonfirst_fixteacher_ds2_temp12_lr5e6_gen4096_2gpu_v2/checkpoint-60
+    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_v2/checkpoint-100
 wait
