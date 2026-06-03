@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=opsd-reward-gt-b0-18k
+#SBATCH --job-name=opsd-reward-gt-b0-rubrichub-30k
 #SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j.out
 #SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j.err
 #SBATCH --partition=gpu
@@ -54,10 +54,10 @@ echo "==================="
 
 cd /gpfs/radev/pi/ying_rex/sg2768/OPSD
 
-DATA_SOURCE="${DATA_SOURCE:-rar_science}"
+DATA_SOURCE="${DATA_SOURCE:-rubrichub}"
 RUBRIC_SOURCE="${RUBRIC_SOURCE:-gt}"
 RUN_TAG="${DATA_SOURCE//-/_}_${RUBRIC_SOURCE//-/_}"
-RUN_CONFIG="qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_${RUN_TAG}_18k"
+RUN_CONFIG="qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_${RUN_TAG}_30k"
 RUBRIC_CACHE_DIR="/gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/rubric_cache/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/${RUN_TAG}"
 
 echo "DATA_SOURCE=${DATA_SOURCE}"
@@ -104,7 +104,7 @@ accelerate launch \
     --rubric_source "${RUBRIC_SOURCE}" \
     --rubric_model_path /gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/checkpoint-1000 \
     --rubric_cache_dir "${RUBRIC_CACHE_DIR}" \
-    --rubric_sample_size 18000 \
+    --rubric_sample_size 30000 \
     --rubric_max_new_tokens 1024 \
     --rubric_distributed \
     --jsd_token_clip 0.05 \

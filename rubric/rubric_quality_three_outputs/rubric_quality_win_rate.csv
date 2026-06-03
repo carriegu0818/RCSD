@@ -1,0 +1,8 @@
+metric,ties,tie_rate,GT_wins,GT_win_rate,learned_wins,learned_win_rate,qwen3_8b_direct_wins,qwen3_8b_direct_win_rate
+relevance,434,0.868,63,0.126,2,0.004,1,0.002
+correctness,236,0.472,250,0.5,10,0.02,4,0.008
+completeness,283,0.566,172,0.344,28,0.056,17,0.034
+specificity,365,0.73,125,0.25,3,0.006,7,0.014
+non_redundancy,282,0.564,101,0.202,69,0.138,48,0.096
+usefulness,361,0.722,117,0.234,11,0.022,11,0.022
+overall,138,0.276,271,0.542,67,0.134,24,0.048

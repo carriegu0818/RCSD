@@ -4,7 +4,7 @@
 #SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j.err
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:4
 #SBATCH --mem=96G
 #SBATCH --cpus-per-task=16
 #SBATCH --time=48:00:00
@@ -56,7 +56,7 @@ if torch.cuda.is_available() and torch.cuda.device_count() > 0:
 PY
 echo "==================="
 
-cd /gpfs/radev/pi/ying_rex/sg2768/OPSD
+cd /gpfs/radev/pi/ying_rex/sg2768/OPSD/rubric
 
 DATASET_NAME="${DATASET_NAME:-siyanzhao/Openthoughts_math_30k_opsd}"
 DATASET_SPLIT="${DATASET_SPLIT:-train}"
@@ -72,7 +72,7 @@ RUBRIC_TEMPERATURE="${RUBRIC_TEMPERATURE:-0.6}"
 RUBRIC_TOP_P="${RUBRIC_TOP_P:-0.95}"
 RUBRIC_TOP_K="${RUBRIC_TOP_K:-20}"
 
-VLLM_TENSOR_PARALLEL_SIZE="${VLLM_TENSOR_PARALLEL_SIZE:-2}"
+VLLM_TENSOR_PARALLEL_SIZE="${VLLM_TENSOR_PARALLEL_SIZE:-4}"
 VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.7}"
 VLLM_MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-10240}"
 VLLM_MAX_NUM_SEQS="${VLLM_MAX_NUM_SEQS:-64}"

@@ -26,8 +26,18 @@ class SelfDistillationDataCollator:
         )
         # Prompt for transitioning to teaching mode after reasoning
         self.transition_prompt = (
-            "\n\nAfter understanding the rubric and reference answer, now solve the question step by step, "
-            "ensuring your reasoning satisfies the rubric. Put the final answer within \\boxed{}.\n"
+           "\n\nThe reference and rubric above is provided only as private guidance to help you understand "
+            "the correct reasoning path. Do NOT mention, cite, or refer to the reference solution, rubric, "
+            "answer key, ground truth, or any external guidance in your response. Do NOT write phrases such as "
+            "'given the solution', 'from the reference', 'according to the rubric', 'we know the answer is', "
+            "or anything implying that you have seen the answer in advance. "
+            "Instead, produce a natural, self-contained solution as if you are solving the problem independently "
+            "from the original problem statement. Use your own reasoning process, derive the result step by step, "
+            "and only present the final answer after the reasoning supports it. "
+            "Think step by step, explore different approaches if useful, and don't be afraid to backtrack "
+            "or reconsider if something doesn't work out. Put the final answer within \\boxed{}.\n"
+            # "\n\nAfter understanding the rubric and reference answer, now solve the question step by step, "
+            # "ensuring your reasoning satisfies the rubric. Put the final answer within \\boxed{}.\n"
         )
 
         # Set padding side explicitly for consistency

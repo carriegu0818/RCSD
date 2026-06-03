@@ -103,6 +103,66 @@ def _normalize_optional_string(value):
     return value
 
 
+def _extract_prompt_text(prompt):
+    if prompt is None:
+        return None
+    if isinstance(prompt, str):
+        return prompt
+    if isinstance(prompt, list):
+        parts = []
+        for message in prompt:
+            if isinstance(message, dict):
+                content = message.get("content")
+                if content is not None:
+                    parts.append(_normalize_text(content))
+            elif message is not None:
+                parts.append(_normalize_text(message))
+        return "\n".join(part for part in parts if part and part.strip()) or None
+    if isinstance(prompt, dict):
+        content = prompt.get("content")
+        if content is not None:
+            return _normalize_text(content)
+    return _normalize_text(prompt)
+
+
+def _normalize_rubrichub_rubrics(rubrics):
+    normalized = []
+    if not isinstance(rubrics, list):
+        return rubrics
+    for idx, rubric in enumerate(rubrics, start=1):
+        if not isinstance(rubric, dict):
+            normalized.append(rubric)
+            continue
+        description = rubric.get("description") or rubric.get("criterion") or rubric.get("criteria")
+        weight = rubric.get("weight", rubric.get("points", rubric.get("score", 1)))
+        title = rubric.get("title") or f"Criterion {idx}"
+        normalized.append(
+            {
+                "title": _normalize_text(title),
+                "description": _normalize_text(description),
+                "weight": weight,
+            }
+        )
+    return normalized
+
+
+def _normalize_rubrichub_example(example):
+    question = _extract_prompt_text(example.get("prompt") or example.get("query"))
+    reward_model = example.get("reward_model") if isinstance(example.get("reward_model"), dict) else {}
+    reference_answer = (
+        example.get("reference_answer")
+        or example.get("answer")
+        or reward_model.get("ground_truth")
+        or "No reference answer provided; use the rubric as the authoritative guidance."
+    )
+    rubrics = example.get("rubric_list") or example.get("Rubrics") or example.get("rubrics") or reward_model.get("rubrics")
+
+    example["question"] = _normalize_text(question)
+    example["reference_answer"] = _normalize_text(reference_answer)
+    example["rubric_list"] = _normalize_rubrichub_rubrics(rubrics)
+    return example
+
+
 def _extract_json_array(text: str) -> str:
     if text is None:
         return ""
@@ -162,6 +222,12 @@ def _load_training_dataset(data_source: str):
         dataset = load_dataset("facebook/natural_reasoning")
     elif data_source == "rar_science":
         dataset = load_dataset("anisha2102/RaR-Science")
+    elif data_source == "rubrichub":
+        dataset = load_dataset("sojuL/RubricHub_v1")
+        return dataset["train"].map(
+            _normalize_rubrichub_example,
+            desc="Normalizing RubricHub columns",
+        )
     else:
         raise ValueError(f"Unsupported data_source={data_source!r}.")
     return dataset["train"]
@@ -736,8 +802,10 @@ if __name__ == "__main__":
             "naturalreasoning": "natural_reasoning",
             "rar": "rar_science",
             "rarscience": "rar_science",
+            "rubric_hub": "rubrichub",
+            "rubric-hub": "rubrichub",
         },
-        valid_values={"natural_reasoning", "rar_science"},
+        valid_values={"natural_reasoning", "rar_science", "rubrichub"},
     )
     script_args.rubric_source = _normalize_source_arg(
         script_args.rubric_source,

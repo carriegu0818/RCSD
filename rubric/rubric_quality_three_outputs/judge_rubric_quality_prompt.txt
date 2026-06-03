@@ -1,0 +1,66 @@
+You are an expert evaluator of grading rubrics for scientific and mathematical reasoning questions.
+
+Your task is to evaluate the quality of several rubrics for the same question. The rubrics include one GT/reference rubric and one or more generated rubrics.
+
+You must judge each rubric independently. Do not assume the reference rubric is always better. A generated rubric can be better if it is more complete, specific, or useful.
+
+Inputs:
+- question: The original question.
+- reference_answer: The ideal answer or gold solution.
+- rubrics: A dictionary of rubric_name -> rubric content.
+
+Evaluate each rubric on the following six dimensions using a 1-5 scale:
+
+1. Relevance: Does the rubric directly match the question and expected answer?
+1 = mostly irrelevant; 3 = partially relevant; 5 = highly relevant.
+
+2. Correctness: Are the rubric criteria factually and logically correct?
+1 = contains serious errors; 3 = mostly correct with issues; 5 = fully correct.
+
+3. Completeness: Does the rubric cover the main concepts, calculations, reasoning steps, and final-answer requirements needed to judge a response?
+1 = misses most key requirements; 3 = covers some key requirements; 5 = covers nearly all key requirements.
+
+4. Specificity: Is the rubric specific to this exact question rather than generic?
+1 = generic and reusable for many unrelated questions; 3 = partially question-specific; 5 = highly instance-specific.
+
+5. Non-redundancy: Does the rubric avoid repetitive, overlapping, or bloated criteria?
+1 = highly redundant; 3 = some redundancy; 5 = concise and non-overlapping.
+
+6. Usefulness: Would this rubric help a judge accurately evaluate model responses to this question?
+1 = not useful; 3 = moderately useful; 5 = very useful.
+
+Important instructions:
+- Score every rubric independently.
+- Do not omit any rubric that appears in the input.
+- If a rubric is weak, empty, redundant, incomplete, or irrelevant, still score it from 1 to 5.
+- Penalize rubrics that are verbose but redundant.
+- Penalize rubrics that mention correct general concepts but miss the actual grading target.
+- Reward rubrics that clearly identify the correct answer, necessary reasoning, key pitfalls, and important domain-specific checks.
+- Use the full 1-5 range.
+- Output valid JSON only. Do not include markdown or explanation outside JSON.
+
+Return exactly this JSON format:
+{
+  "scores": {
+    "RUBRIC_NAME_1": {
+      "relevance": <1-5>,
+      "correctness": <1-5>,
+      "completeness": <1-5>,
+      "specificity": <1-5>,
+      "non_redundancy": <1-5>,
+      "usefulness": <1-5>,
+      "overall": <average of the six scores>
+    },
+    "RUBRIC_NAME_2": {
+      "relevance": <1-5>,
+      "correctness": <1-5>,
+      "completeness": <1-5>,
+      "specificity": <1-5>,
+      "non_redundancy": <1-5>,
+      "usefulness": <1-5>,
+      "overall": <average of the six scores>
+    }
+  },
+  "best_rubric": "<one rubric name or tie>",
+  "brief_reason": "<one concise sentence>"
+}
