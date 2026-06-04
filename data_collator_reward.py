@@ -13,10 +13,19 @@ class SelfDistillationDataCollator:
     within each batch, and track the actual (unpadded) prompt lengths for loss masking.
     """
 
-    def __init__(self, tokenizer, max_length=2048, reason_first=True):
+    def __init__(
+        self,
+        tokenizer,
+        max_length=2048,
+        reason_first=True,
+        student_thinking=True,
+        teacher_thinking=True,
+    ):
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.reason_first = reason_first
+        self.student_thinking = student_thinking
+        self.teacher_thinking = teacher_thinking
 
         # Prompt for reasoning about the rubric/reference answer before teaching
         self.reason_first_prompt = (
@@ -45,6 +54,8 @@ class SelfDistillationDataCollator:
         self.tokenizer.padding_side = "right"
         print(f"[DataCollator] Set padding_side to: {self.tokenizer.padding_side}")
         print(f"[DataCollator] Reason first mode: {self.reason_first}")
+        print(f"[DataCollator] Student thinking mode: {self.student_thinking}")
+        print(f"[DataCollator] Teacher thinking mode: {self.teacher_thinking}")
 
     def __call__(self, features):
 
@@ -85,7 +96,10 @@ class SelfDistillationDataCollator:
 
             # Apply chat template for student (matching evaluation)
             student_prompt = self.tokenizer.apply_chat_template(
-                student_messages, tokenize=False, add_generation_prompt=True
+                student_messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=self.student_thinking,
             )
             student_prompts.append(student_prompt)
 
@@ -99,7 +113,10 @@ class SelfDistillationDataCollator:
                 )
                 reasoning_messages = [{"role": "user", "content": reasoning_user_message}]
                 reasoning_prompt = self.tokenizer.apply_chat_template(
-                    reasoning_messages, tokenize=False, add_generation_prompt=True
+                    reasoning_messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=self.teacher_thinking,
                 )
                 teacher_reasoning_prompts.append(reasoning_prompt)
 
@@ -119,7 +136,10 @@ class SelfDistillationDataCollator:
 
                 # Apply chat template for teacher
                 teacher_prompt = self.tokenizer.apply_chat_template(
-                    teacher_messages, tokenize=False, add_generation_prompt=True
+                    teacher_messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=self.teacher_thinking,
                 )
                 teacher_prompts.append(teacher_prompt)
 

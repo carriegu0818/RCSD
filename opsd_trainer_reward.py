@@ -142,6 +142,8 @@ class OPSDTrainer(SFTTrainer):
         jsd_token_clip: float | None = None,
         use_ema_teacher: bool = False,
         ema_decay: float = 0.999,
+        student_thinking: bool = True,
+        teacher_thinking: bool = True,
     ):
         self.model_name_or_path = model if isinstance(model, str) else model.config._name_or_path
         self.model_revision = getattr(args, "student_model_revision", None)
@@ -152,7 +154,11 @@ class OPSDTrainer(SFTTrainer):
         # Custom data collator for self-distillation
         if data_collator is None:
             data_collator = SelfDistillationDataCollator(
-                tokenizer=processing_class, max_length=args.max_length, reason_first=reason_first
+                tokenizer=processing_class,
+                max_length=args.max_length,
+                reason_first=reason_first,
+                student_thinking=student_thinking,
+                teacher_thinking=teacher_thinking,
             )
 
         super().__init__(
@@ -184,6 +190,8 @@ class OPSDTrainer(SFTTrainer):
         self.jsd_token_clip = jsd_token_clip
         self.use_ema_teacher = use_ema_teacher
         self.ema_decay = ema_decay
+        self.student_thinking = student_thinking
+        self.teacher_thinking = teacher_thinking
         self._ema_params = None  # lazily initialized on first optimizer step
 
         # Validate fixed_teacher option
@@ -219,6 +227,12 @@ class OPSDTrainer(SFTTrainer):
             print("REASON FIRST MODE ENABLED")
             print("Teacher will first reason about the privileged rubric context, then evaluate student's response")
             print(f"{'='*80}\n")
+
+        print(f"\n{'='*80}")
+        print("THINKING MODE CONFIGURATION")
+        print(f"Student thinking: {self.student_thinking}")
+        print(f"Teacher thinking: {self.teacher_thinking}")
+        print(f"{'='*80}\n")
 
         # Track per-step loss statistics for on/off-policy batches (used in logging)
         self._on_policy_loss_total = 0.0

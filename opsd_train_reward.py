@@ -1,10 +1,12 @@
 import json
 import os
+import random
 import re
 import wandb
+from glob import glob
 from contextlib import contextmanager
 
-from datasets import load_dataset, load_from_disk, concatenate_datasets
+from datasets import Dataset, load_dataset, load_from_disk, concatenate_datasets
 from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 
 from trl import (
@@ -28,6 +30,9 @@ except Exception:
 
 # Enable logging in a Hugging Face Space
 os.environ.setdefault("TRACKIO_SPACE_ID", "trl-trackio")
+
+
+RUBRICHUB_SCIENCE_SOURCES = {"RaR_science.jsonl", "MegeScience.jsonl"}
 
 
 class RubricPromptBuilder:
@@ -163,6 +168,98 @@ def _normalize_rubrichub_example(example):
     return example
 
 
+def _find_cached_rubrichub_parquet_files():
+    cache_roots = []
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        cache_roots.append(os.path.join(hf_home, "hub"))
+    hf_hub_cache = os.environ.get("HF_HUB_CACHE")
+    if hf_hub_cache:
+        cache_roots.append(hf_hub_cache)
+    cache_roots.append(os.path.expanduser("~/.cache/huggingface/hub"))
+
+    patterns = []
+    for cache_root in dict.fromkeys(cache_roots):
+        dataset_root = os.path.join(cache_root, "datasets--sojuL--RubricHub_v1", "snapshots", "*")
+        patterns.extend(
+            [
+                os.path.join(dataset_root, "sft_RuFT", "*.parquet"),
+            ]
+        )
+    return sorted({path for pattern in patterns for path in glob(pattern)})
+
+
+def _minimal_rubrichub_row(example):
+    normalized = _normalize_rubrichub_example(example)
+    return {
+        "question": normalized.get("question"),
+        "reference_answer": normalized.get("reference_answer"),
+        "rubric_list": normalized.get("rubric_list"),
+        "data_source": "Science",
+        "rubrichub_source": example.get("source"),
+    }
+
+
+def _load_rubrichub_dataset(sample_size: int = 0, seed: int = 42):
+    files = _find_cached_rubrichub_parquet_files()
+    if not files:
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as exc:
+            raise RuntimeError(
+                "RubricHub parquet files were not found in the Hugging Face cache, and "
+                "huggingface_hub is unavailable for snapshot download."
+            ) from exc
+        snapshot_dir = snapshot_download(
+            "sojuL/RubricHub_v1",
+            repo_type="dataset",
+            allow_patterns=["sft_RuFT/*.parquet"],
+        )
+        files = sorted(glob(os.path.join(snapshot_dir, "sft_RuFT", "*.parquet")))
+    if not files:
+        raise RuntimeError("No RubricHub parquet files found after dataset download.")
+
+    import pyarrow.parquet as pq
+
+    rng = random.Random(seed)
+    rng.shuffle(files)
+
+    rows = []
+    for file_idx, path in enumerate(files):
+        parquet_file = pq.ParquetFile(path)
+        schema_names = parquet_file.schema_arrow.names
+        columns = [name for name in ("source", "query", "answer", "rubrics") if name in schema_names]
+        if not {"source", "query", "answer", "rubrics"}.issubset(columns):
+            continue
+        remaining_files = len(files) - file_idx
+        file_sample_limit = None
+        if sample_size and sample_size > 0:
+            remaining_rows = sample_size - len(rows)
+            if remaining_rows <= 0:
+                break
+            file_sample_limit = max(1, (remaining_rows + remaining_files - 1) // remaining_files)
+        file_rows = 0
+        for batch in parquet_file.iter_batches(columns=columns, batch_size=1024):
+            for example in batch.to_pylist():
+                if example.get("source") not in RUBRICHUB_SCIENCE_SOURCES:
+                    continue
+                if not example.get("answer") or not example.get("rubrics"):
+                    continue
+                row = _minimal_rubrichub_row(example)
+                if sample_size and sample_size > 0:
+                    rows.append(row)
+                    file_rows += 1
+                    if len(rows) >= sample_size or file_rows >= file_sample_limit:
+                        break
+                else:
+                    rows.append(row)
+            if sample_size and sample_size > 0 and (
+                len(rows) >= sample_size or file_rows >= file_sample_limit
+            ):
+                break
+    return Dataset.from_list(rows)
+
+
 def _extract_json_array(text: str) -> str:
     if text is None:
         return ""
@@ -217,17 +314,13 @@ def _normalize_source_arg(value: str, field_name: str, aliases: dict[str, str], 
     return normalized
 
 
-def _load_training_dataset(data_source: str):
+def _load_training_dataset(data_source: str, sample_size: int = 0, seed: int = 42):
     if data_source == "natural_reasoning":
         dataset = load_dataset("facebook/natural_reasoning")
     elif data_source == "rar_science":
         dataset = load_dataset("anisha2102/RaR-Science")
     elif data_source == "rubrichub":
-        dataset = load_dataset("sojuL/RubricHub_v1")
-        return dataset["train"].map(
-            _normalize_rubrichub_example,
-            desc="Normalizing RubricHub columns",
-        )
+        return _load_rubrichub_dataset(sample_size=sample_size, seed=seed)
     else:
         raise ValueError(f"Unsupported data_source={data_source!r}.")
     return dataset["train"]
@@ -283,7 +376,14 @@ def _use_generic_rubric(example):
     return example
 
 
-def _build_reward_prompt_text(tokenizer, question: str, reference_answer: str, rubric: str, reason_first: bool) -> str:
+def _build_reward_prompt_text(
+    tokenizer,
+    question: str,
+    reference_answer: str,
+    rubric: str,
+    reason_first: bool,
+    teacher_thinking: bool = True,
+) -> str:
     if reason_first:
         user_message = (
             f"Question: {question}\n\n"
@@ -302,10 +402,21 @@ def _build_reward_prompt_text(tokenizer, question: str, reference_answer: str, r
             "Please reason step by step, and put your final answer within \\boxed{}."
         )
     messages = [{"role": "user", "content": user_message}]
-    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=teacher_thinking,
+    )
 
 
-def _within_reward_prompt_limit(example, tokenizer, max_prompt_tokens: int, reason_first: bool) -> bool:
+def _within_reward_prompt_limit(
+    example,
+    tokenizer,
+    max_prompt_tokens: int,
+    reason_first: bool,
+    teacher_thinking: bool = True,
+) -> bool:
     question = _normalize_text(_get_first_present(example, ["question", "problem", "prompt", "instruction", "input"]))
     reference_answer = _normalize_text(
         _get_first_present(example, ["reference_answer", "reference", "answer", "final_answer", "solution"])
@@ -315,7 +426,14 @@ def _within_reward_prompt_limit(example, tokenizer, max_prompt_tokens: int, reas
     if question is None or reference_answer is None or rubric is None:
         return False
 
-    prompt_text = _build_reward_prompt_text(tokenizer, question, reference_answer, rubric, reason_first)
+    prompt_text = _build_reward_prompt_text(
+        tokenizer,
+        question,
+        reference_answer,
+        rubric,
+        reason_first,
+        teacher_thinking=teacher_thinking,
+    )
     prompt_tokens = tokenizer(
         prompt_text,
         padding=False,
@@ -724,6 +842,20 @@ class CustomScriptArguments(ScriptArguments):
             "Typical range: 0.99–0.9999. Only used when use_ema_teacher=True."
         },
     )
+    student_thinking: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to enable Qwen3 thinking mode for the student during rollout. "
+            "Default True to preserve existing reward-training scripts."
+        },
+    )
+    teacher_thinking: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to enable Qwen3 thinking mode for teacher privileged prompts and teacher reasoning. "
+            "Default True to preserve existing reward-training scripts."
+        },
+    )
     rubric_model_path: str = field(
         default="/gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/checkpoint-1000",
         metadata={
@@ -867,6 +999,8 @@ if __name__ == "__main__":
     print(f"Data Source: {script_args.data_source}")
     print(f"Rubric Source: {script_args.rubric_source}")
     print(f"Rubric Model Path: {script_args.rubric_model_path}")
+    print(f"Student Thinking: {script_args.student_thinking}")
+    print(f"Teacher Thinking: {script_args.teacher_thinking}")
     if script_args.rubric_base_model_name_or_path:
         print(f"Rubric Base Model Override: {script_args.rubric_base_model_name_or_path}")
     print(f"{'='*80}\n")
@@ -912,6 +1046,8 @@ if __name__ == "__main__":
                 "top_k_loss": script_args.top_k_loss if script_args.top_k_loss > 0 else None,
                 "use_ema_teacher": script_args.use_ema_teacher,
                 "ema_decay": script_args.ema_decay if script_args.use_ema_teacher else None,
+                "student_thinking": script_args.student_thinking,
+                "teacher_thinking": script_args.teacher_thinking,
             },
         )
 
@@ -982,7 +1118,13 @@ if __name__ == "__main__":
     # SFTTrainer requires a dataset_text_field; use question to avoid KeyError on tokenization.
     training_args.dataset_text_field = "question"
 
-    train_dataset = _load_training_dataset(script_args.data_source)
+    sample_size = getattr(script_args, "rubric_sample_size", 0)
+    seed = getattr(training_args, "seed", 42)
+    train_dataset = _load_training_dataset(
+        script_args.data_source,
+        sample_size=sample_size if script_args.data_source == "rubrichub" else 0,
+        seed=seed,
+    )
 
     # Filter out entries with empty reference answers
     def _has_reference_answer(batch):
@@ -1007,8 +1149,6 @@ if __name__ == "__main__":
     )
 
     # Sample a subset for rubric generation (or all if smaller / disabled)
-    sample_size = getattr(script_args, "rubric_sample_size", 0)
-    seed = getattr(training_args, "seed", 42)
     train_dataset = train_dataset.shuffle(seed=seed)
     if sample_size and sample_size > 0 and len(train_dataset) > sample_size:
         train_dataset = train_dataset.select(range(sample_size))
@@ -1147,6 +1287,7 @@ if __name__ == "__main__":
             tokenizer=tokenizer,
             max_prompt_tokens=script_args.max_reward_prompt_tokens,
             reason_first=script_args.reason_first,
+            teacher_thinking=script_args.teacher_thinking,
         ),
         desc=f"Filtering reward prompts > {script_args.max_reward_prompt_tokens} tokens",
     )
@@ -1180,6 +1321,8 @@ if __name__ == "__main__":
         jsd_token_clip=script_args.jsd_token_clip if script_args.jsd_token_clip > 0 else None,
         use_ema_teacher=script_args.use_ema_teacher,
         ema_decay=script_args.ema_decay,
+        student_thinking=script_args.student_thinking,
+        teacher_thinking=script_args.teacher_thinking,
     )
 
     if training_args.eval_strategy != "no":
