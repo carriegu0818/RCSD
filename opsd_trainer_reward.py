@@ -144,6 +144,9 @@ class OPSDTrainer(SFTTrainer):
         ema_decay: float = 0.999,
         student_thinking: bool = True,
         teacher_thinking: bool = True,
+        teacher_reasoning_thinking: bool = True,
+        teacher_solution_cot: bool = False,
+        teacher_solution_rubric: bool = True,
     ):
         self.model_name_or_path = model if isinstance(model, str) else model.config._name_or_path
         self.model_revision = getattr(args, "student_model_revision", None)
@@ -159,6 +162,9 @@ class OPSDTrainer(SFTTrainer):
                 reason_first=reason_first,
                 student_thinking=student_thinking,
                 teacher_thinking=teacher_thinking,
+                teacher_reasoning_thinking=teacher_reasoning_thinking,
+                teacher_solution_cot=teacher_solution_cot,
+                teacher_solution_rubric=teacher_solution_rubric,
             )
 
         super().__init__(
@@ -192,6 +198,7 @@ class OPSDTrainer(SFTTrainer):
         self.ema_decay = ema_decay
         self.student_thinking = student_thinking
         self.teacher_thinking = teacher_thinking
+        self.teacher_reasoning_thinking = teacher_reasoning_thinking
         self._ema_params = None  # lazily initialized on first optimizer step
 
         # Validate fixed_teacher option
@@ -232,6 +239,7 @@ class OPSDTrainer(SFTTrainer):
         print("THINKING MODE CONFIGURATION")
         print(f"Student thinking: {self.student_thinking}")
         print(f"Teacher thinking: {self.teacher_thinking}")
+        print(f"Teacher reasoning thinking: {self.teacher_reasoning_thinking}")
         print(f"{'='*80}\n")
 
         # Track per-step loss statistics for on/off-policy batches (used in logging)

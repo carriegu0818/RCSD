@@ -32,8 +32,9 @@ export TORCHINDUCTOR_CACHE_DIR=/gpfs/radev/pi/ying_rex/sg2768/.cache/torch/induc
 
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export TOKENIZERS_PARALLELISM=true
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
+export PYTHONUNBUFFERED=1
 
 module load GCC/12.2.0
 
@@ -62,12 +63,12 @@ DATASET_NAME="${DATASET_NAME:-siyanzhao/Openthoughts_math_30k_opsd}"
 DATASET_SPLIT="${DATASET_SPLIT:-train}"
 
 RUBRIC_MODEL_PATH="${RUBRIC_MODEL_PATH:-Qwen/Qwen3-14B}"
-RUBRIC_CACHE_DIR="${RUBRIC_CACHE_DIR:-/gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/rubric_cache/openthoughts_math_30k_qwen3_14b_rubrics}"
+RUBRIC_CACHE_DIR="${RUBRIC_CACHE_DIR:-/gpfs/radev/pi/ying_rex/sg2768/OPSD/rubric_cache/openthoughts_math_30k_qwen3_14b_rubrics}"
 RUBRIC_WORK_DIR="${RUBRIC_WORK_DIR:-${RUBRIC_CACHE_DIR}_work}"
 RUBRIC_SAMPLE_SIZE="${RUBRIC_SAMPLE_SIZE:-25000}"
 RUBRIC_PROMPT_MAX_LENGTH="${RUBRIC_PROMPT_MAX_LENGTH:-8192}"
 RUBRIC_MAX_NEW_TOKENS="${RUBRIC_MAX_NEW_TOKENS:-2048}"
-RUBRIC_BATCH_SIZE="${RUBRIC_BATCH_SIZE:-8}"
+RUBRIC_BATCH_SIZE="${RUBRIC_BATCH_SIZE:-16}"
 RUBRIC_TEMPERATURE="${RUBRIC_TEMPERATURE:-0.6}"
 RUBRIC_TOP_P="${RUBRIC_TOP_P:-0.95}"
 RUBRIC_TOP_K="${RUBRIC_TOP_K:-20}"
@@ -85,7 +86,9 @@ ENABLE_THINKING="${ENABLE_THINKING:-1}"
 TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-0}"
 FILTER_INVALID="${FILTER_INVALID:-0}"
 GUIDED_DECODING_REGEX="${GUIDED_DECODING_REGEX:-}"
-DISABLE_CUSTOM_ALL_REDUCE="${DISABLE_CUSTOM_ALL_REDUCE:-0}"
+# H100 multi-GPU: vLLM custom all-reduce often fails (see ot-math-rubrics-1966089.out).
+DISABLE_CUSTOM_ALL_REDUCE="${DISABLE_CUSTOM_ALL_REDUCE:-1}"
+KEEP_WORK_DIR="${KEEP_WORK_DIR:-1}"
 
 echo "DATASET_NAME=${DATASET_NAME}"
 echo "DATASET_SPLIT=${DATASET_SPLIT}"
@@ -109,6 +112,8 @@ echo "REGENERATE_RUBRICS=${REGENERATE_RUBRICS}"
 echo "RESUME_RUBRICS=${RESUME_RUBRICS}"
 echo "ENABLE_THINKING=${ENABLE_THINKING}"
 echo "FILTER_INVALID=${FILTER_INVALID}"
+echo "DISABLE_CUSTOM_ALL_REDUCE=${DISABLE_CUSTOM_ALL_REDUCE}"
+echo "KEEP_WORK_DIR=${KEEP_WORK_DIR}"
 
 CMD=(
     python generate_openthoughts_math_rubrics_vllm.py
@@ -159,6 +164,9 @@ if [[ "${FILTER_INVALID}" == "1" ]]; then
 fi
 if [[ "${DISABLE_CUSTOM_ALL_REDUCE}" == "1" ]]; then
     CMD+=(--disable_custom_all_reduce)
+fi
+if [[ "${KEEP_WORK_DIR}" == "1" ]]; then
+    CMD+=(--keep_work_dir)
 fi
 if [[ -n "${GUIDED_DECODING_REGEX}" ]]; then
     CMD+=(--guided_decoding_regex "${GUIDED_DECODING_REGEX}")

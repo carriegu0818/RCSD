@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-eval-gt-rubrics.out
-#SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-eval-gt-rubrics.err
+#SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-eval-gt-math-rubrics.out
+#SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j-eval-gt-math-rubrics.err
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2         # request 4 GPUs
@@ -44,20 +44,20 @@ TP_SIZE=$(awk -F',' '{print NF}' <<< "$CUDA_DEVICES")
 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1 python evaluate_math.py \
     --base_model "$BASE_MODEL" \
     --dataset "aime25" \
-    --val_n 8 \
+    --val_n 4 \
     --temperature 1.0 \
     --tensor_parallel_size "$TP_SIZE" \
-    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_v2/checkpoint-100
+    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_rfirst_lr5e6_4096_b0_openthoughts_math_cache_25k_thinking/checkpoint-100
 wait
 
 # # evaluate base model performance
 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1 python evaluate_math.py \
     --base_model "$BASE_MODEL" \
     --dataset "aime24" \
-    --val_n 8 \
+    --val_n 4 \
     --temperature 1.0 \
     --tensor_parallel_size "$TP_SIZE" \
-    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_v2/checkpoint-100
+    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_rfirst_lr5e6_4096_b0_openthoughts_math_cache_25k_thinking/checkpoint-100
 wait
 
 
@@ -65,17 +65,17 @@ wait
 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1 python evaluate_math.py \
     --base_model "$BASE_MODEL" \
     --dataset "hmmt25" \
-    --val_n 8 \
+    --val_n 4 \
     --temperature 1.0 \
     --tensor_parallel_size "$TP_SIZE" \
-    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_v2/checkpoint-100
+    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_rfirst_lr5e6_4096_b0_openthoughts_math_cache_25k_thinking/checkpoint-100
 wait
 
 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1 python evaluate_math.py \
     --base_model "$BASE_MODEL" \
     --dataset "math500" \
-    --val_n 8 \
+    --val_n 4 \
     --temperature 1.0 \
     --tensor_parallel_size "$TP_SIZE" \
-    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_v2/checkpoint-100
+    --checkpoint_dir /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_rfirst_lr5e6_4096_b0_openthoughts_math_cache_25k_thinking/checkpoint-100
 wait

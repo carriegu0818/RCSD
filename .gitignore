@@ -24,6 +24,9 @@ eval/eval_results/
 .vscode/
 slurm/*.out
 slurm/*.err
+data/
+rubric_cache/
+rubric/
 
 # OS
 .DS_Store

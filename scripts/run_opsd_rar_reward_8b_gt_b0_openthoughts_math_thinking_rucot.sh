@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=opsd-reward-gt-b0-18k
+#SBATCH --job-name=opsd-reward-gt-b0-ot-math-thinking
 #SBATCH --output=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j.out
 #SBATCH --error=/gpfs/radev/pi/ying_rex/sg2768/OPSD/slurm/%x-%j.err
 #SBATCH --partition=gpu
@@ -54,28 +54,36 @@ echo "==================="
 
 cd /gpfs/radev/pi/ying_rex/sg2768/OPSD
 
-DATA_SOURCE="${DATA_SOURCE:-rar_science}"
-RUBRIC_SOURCE="${RUBRIC_SOURCE:-gt}"
+DATA_SOURCE="${DATA_SOURCE:-openthoughts_math}"
+RUBRIC_SOURCE="${RUBRIC_SOURCE:-cache}"
 RUN_TAG="${DATA_SOURCE//-/_}_${RUBRIC_SOURCE//-/_}"
-RUN_CONFIG="qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_${RUN_TAG}_18k"
-RUBRIC_CACHE_DIR="/gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/rubric_cache/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/${RUN_TAG}"
+RUN_CONFIG="qwen3_8b_reward_rfirst_lr5e6_4096_b0_${RUN_TAG}_25k_thinking_rucot"
+# Use the save_to_disk cache (not *_work, which only holds intermediate rubrics.jsonl).
+# Cache is pre-filtered to drop empty/invalid rubrics (~22.8k valid examples).
+RUBRIC_CACHE_DIR="${RUBRIC_CACHE_DIR:-/gpfs/radev/pi/ying_rex/sg2768/OPSD/rubric_cache/openthoughts_math_30k_qwen3_14b_rubrics}"
+export RUBRIC_CACHE_DIR
 
 echo "DATA_SOURCE=${DATA_SOURCE}"
 echo "RUBRIC_SOURCE=${RUBRIC_SOURCE}"
 echo "RUN_CONFIG=${RUN_CONFIG}"
+echo "RUBRIC_CACHE_DIR=${RUBRIC_CACHE_DIR}"
 
+python - <<'PY'
+from datasets import load_from_disk
+import os
 
+cache_dir = os.environ["RUBRIC_CACHE_DIR"]
+ds = load_from_disk(cache_dir)
+print(f"RUBRIC_CACHE rows={len(ds)} columns={ds.column_names}")
+PY
 
-# resume_args=()
-resume_args=(--resume_from_checkpoint /gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_reward_reasonfirst_lr5e6_gen4096_b0_rar_science_gt_18k/checkpoint-320)
+resume_args=()
 
-
-# 2) Train using the selected dataset/rubric source (multi-GPU)
 accelerate launch \
     --config_file accelerate.yaml \
     --num_processes 2 \
     --gradient_accumulation_steps 16 \
-    --main_process_port 11811 \
+    --main_process_port 11816 \
     opsd_train_reward.py \
     --model_name_or_path Qwen/Qwen3-8B \
     --learning_rate 5e-6 \
@@ -102,17 +110,14 @@ accelerate launch \
     --top_k 20 \
     --data_source "${DATA_SOURCE}" \
     --rubric_source "${RUBRIC_SOURCE}" \
-    --rubric_model_path /gpfs/radev/pi/ying_rex/sg2768/OPSD_runtime/outputs/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/checkpoint-1000 \
     --rubric_cache_dir "${RUBRIC_CACHE_DIR}" \
-    --rubric_sample_size 18000 \
-    --rubric_max_new_tokens 1024 \
-    --rubric_distributed \
+    --rubric_sample_size 25000 \
+    --student_thinking True \
+    --teacher_thinking True \
+    --teacher_solution_cot True \
     --jsd_token_clip 0.05 \
     --reason_first \
     --fixed_teacher \
     --wandb_entity sgu33-stanford-university \
     --wandb_project OPSD \
     "${resume_args[@]}"
-
-    
-# #--teacher_prompt_tag rubric reference_answer \

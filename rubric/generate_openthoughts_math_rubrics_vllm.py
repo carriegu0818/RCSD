@@ -509,7 +509,9 @@ def main() -> None:
     if completed:
         print(f"Resuming with {len(completed)} completed rubrics from {records_path}.")
 
+    print("Initializing vLLM engine (this can take several minutes on first run)...", flush=True)
     llm = _make_llm(args, model_name_or_path, tokenizer_name_or_path, adapter_config)
+    print("vLLM engine ready. Starting batched generation.", flush=True)
     sampling_params = _make_sampling_params(args)
     lora_request = _make_lora_request(args.rubric_model_path, model_name_or_path) if is_lora_checkpoint else None
 
@@ -549,6 +551,8 @@ def main() -> None:
         _append_records(records_path, records)
         completed.update({record["idx"]: record["rubrics"] for record in records})
         progress.update(len(batch_indices))
+        if len(completed) % max(args.batch_size * 10, 1) == 0 or len(completed) == len(dataset):
+            print(f"Checkpoint: {len(completed)}/{len(dataset)} rubrics written to {records_path}", flush=True)
     progress.close()
 
     missing = [idx for idx in range(len(dataset)) if idx not in completed]

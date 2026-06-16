@@ -20,22 +20,38 @@ class SelfDistillationDataCollator:
         reason_first=True,
         student_thinking=True,
         teacher_thinking=True,
+        teacher_reasoning_thinking=True,
+        teacher_solution_cot=False,
+        teacher_solution_rubric=True,
     ):
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.reason_first = reason_first
         self.student_thinking = student_thinking
         self.teacher_thinking = teacher_thinking
+        self.teacher_reasoning_thinking = teacher_reasoning_thinking
+        self.teacher_solution_cot = teacher_solution_cot
+        self.teacher_solution_rubric = teacher_solution_rubric
 
         # Prompt for reasoning about the rubric/reference answer before teaching
-        self.reason_first_prompt = (
-            "\n\nThe reference answer and rubric above are guidelines for the questions but may not be perfect. "
-            "Briefly explain the key requirements, constraints, and reasoning expectations implied by them. "
-            "Do NOT solve the question yet. Do NOT use <think> tags.\n"
-        )
+        if self.teacher_solution_rubric:
+            self.reason_first_prompt = (
+                "\n\nThe reference answer and rubric above are guidelines for the questions but may not be perfect. "
+                "Briefly explain the key requirements, constraints, and reasoning expectations implied by them. "
+                "Do NOT solve the question yet. Do NOT use <think> tags.\n"
+            )
+        else:
+            self.reason_first_prompt = (
+                "\n\nThe reference material above is a guideline for the question but may not be perfect. "
+                "Briefly explain the key requirements, constraints, and reasoning expectations implied by it. "
+                "Do NOT solve the question yet. Do NOT use <think> tags.\n"
+            )
         # Prompt for transitioning to teaching mode after reasoning
+        transition_context_label = (
+            "The reference and rubric above is" if self.teacher_solution_rubric else "The reference above is"
+        )
         self.transition_prompt = (
-           "\n\nThe reference and rubric above is provided only as private guidance to help you understand "
+           f"\n\n{transition_context_label} provided only as private guidance to help you understand "
             "the correct reasoning path. Do NOT mention, cite, or refer to the reference solution, rubric, "
             "answer key, ground truth, or any external guidance in your response. Do NOT write phrases such as "
             "'given the solution', 'from the reference', 'according to the rubric', 'we know the answer is', "
@@ -56,6 +72,9 @@ class SelfDistillationDataCollator:
         print(f"[DataCollator] Reason first mode: {self.reason_first}")
         print(f"[DataCollator] Student thinking mode: {self.student_thinking}")
         print(f"[DataCollator] Teacher thinking mode: {self.teacher_thinking}")
+        print(f"[DataCollator] Teacher reasoning thinking mode: {self.teacher_reasoning_thinking}")
+        print(f"[DataCollator] Teacher solution CoT: {self.teacher_solution_cot}")
+        print(f"[DataCollator] Teacher solution rubric: {self.teacher_solution_rubric}")
 
     def __call__(self, features):
 
@@ -80,12 +99,18 @@ class SelfDistillationDataCollator:
                 raise ValueError("Missing question field for reward prompt.")
             if reference_answer is None:
                 raise ValueError("Missing reference_answer field for reward prompt.")
-            if rubric is None:
+            if self.teacher_solution_rubric and rubric is None:
                 raise ValueError("Missing rubric field for reward prompt.")
 
             question_text = self._normalize_text(question)
             reference_answer_text = self._normalize_text(reference_answer)
             rubric_text = self._normalize_text(rubric)
+
+            cot_solution = None
+            if self.teacher_solution_cot:
+                sol = feature.get("solution")
+                if sol is not None:
+                    cot_solution = self._normalize_text(sol)
 
             # Student prompt: just the question with instruction (matching evaluation format)
             student_user_message = (
@@ -108,15 +133,18 @@ class SelfDistillationDataCollator:
                 reasoning_user_message = (
                     f"Question: {question_text}\n\n"
                     f"Reference Answer:\n{reference_answer_text}\n\n"
-                    f"Rubric (JSON array):\n{rubric_text}\n"
-                    f"{self.reason_first_prompt}"
                 )
+                if cot_solution:
+                    reasoning_user_message += f"Chain-of-Thought Solution:\n{cot_solution}\n\n"
+                if self.teacher_solution_rubric:
+                    reasoning_user_message += f"Rubric (JSON array):\n{rubric_text}\n"
+                reasoning_user_message += self.reason_first_prompt
                 reasoning_messages = [{"role": "user", "content": reasoning_user_message}]
                 reasoning_prompt = self.tokenizer.apply_chat_template(
                     reasoning_messages,
                     tokenize=False,
                     add_generation_prompt=True,
-                    enable_thinking=self.teacher_thinking,
+                    enable_thinking=self.teacher_reasoning_thinking,
                 )
                 teacher_reasoning_prompts.append(reasoning_prompt)
 
@@ -128,10 +156,20 @@ class SelfDistillationDataCollator:
                 teacher_user_message = (
                     f"Question: {question_text}\n\n"
                     f"Reference Answer:\n{reference_answer_text}\n\n"
-                    f"Rubric (JSON array):\n{rubric_text}\n\n"
-                    "Use the rubric and reference answer as guidance.\n"
-                    "Please reason step by step, and put your final answer within \\boxed{}."
                 )
+                if cot_solution:
+                    teacher_user_message += f"Chain-of-Thought Solution:\n{cot_solution}\n\n"
+                if self.teacher_solution_rubric:
+                    teacher_user_message += (
+                        f"Rubric (JSON array):\n{rubric_text}\n\n"
+                        "Use the rubric and reference answer as guidance.\n"
+                        "Please reason step by step, and put your final answer within \\boxed{}."
+                    )
+                else:
+                    teacher_user_message += (
+                        "Use the reference material above as guidance.\n"
+                        "Please reason step by step, and put your final answer within \\boxed{}."
+                    )
                 teacher_messages = [{"role": "user", "content": teacher_user_message}]
 
                 # Apply chat template for teacher

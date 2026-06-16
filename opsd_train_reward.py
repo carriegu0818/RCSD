@@ -299,9 +299,27 @@ def _is_valid_rubric_text(text: str) -> bool:
 
 
 def _sanitize_rubric_example(example):
-    sanitized = _extract_json_array(example.get("rubric"))
+    rubric_raw = example.get("rubric")
+    if rubric_raw is None:
+        rubric_raw = example.get("rubrics")
+    sanitized = _extract_json_array(rubric_raw)
     example["rubric"] = sanitized
     example["rubric_valid"] = _is_valid_rubric_text(sanitized)
+    return example
+
+
+def _normalize_reward_example(example):
+    """Ensure canonical column names for SFTTrainer tokenization and the reward collator."""
+    question = _get_first_present(example, ["question", "problem", "prompt", "instruction", "input"])
+    reference_answer = _get_first_present(
+        example, ["reference_answer", "reference", "answer", "final_answer", "solution"]
+    )
+    rubric = _get_first_present(example, ["rubric", "rubric_list", "rubrics"])
+
+    example["question"] = _normalize_text(question)
+    example["reference_answer"] = _normalize_text(reference_answer)
+    if rubric is not None:
+        example["rubric"] = _normalize_text(rubric)
     return example
 
 
@@ -314,6 +332,25 @@ def _normalize_source_arg(value: str, field_name: str, aliases: dict[str, str], 
     return normalized
 
 
+RURL_SCIENCE_TRAIN_DIR = os.environ.get(
+    "RURL_SCIENCE_TRAIN_DIR",
+    "/gpfs/radev/pi/ying_rex/sg2768/OPSD/data/rurl_science/train",
+)
+
+
+def _load_rurl_science_dataset():
+    """Load the preprocessed RubricHub RuRL/Science train split (1k test already held out).
+
+    Build it first with: python preprocess_rurl_science.py
+    """
+    if not os.path.isdir(RURL_SCIENCE_TRAIN_DIR):
+        raise RuntimeError(
+            f"RuRL/Science train split not found at {RURL_SCIENCE_TRAIN_DIR}. "
+            "Run `python preprocess_rurl_science.py` first to build the train/test split."
+        )
+    return load_from_disk(RURL_SCIENCE_TRAIN_DIR)
+
+
 def _load_training_dataset(data_source: str, sample_size: int = 0, seed: int = 42):
     if data_source == "natural_reasoning":
         dataset = load_dataset("facebook/natural_reasoning")
@@ -321,6 +358,11 @@ def _load_training_dataset(data_source: str, sample_size: int = 0, seed: int = 4
         dataset = load_dataset("anisha2102/RaR-Science")
     elif data_source == "rubrichub":
         return _load_rubrichub_dataset(sample_size=sample_size, seed=seed)
+    elif data_source == "rurl_science":
+        return _load_rurl_science_dataset()
+    elif data_source == "openthoughts_math":
+        dataset = load_dataset("siyanzhao/Openthoughts_math_30k_opsd")
+        return dataset["train"]
     else:
         raise ValueError(f"Unsupported data_source={data_source!r}.")
     return dataset["train"]
@@ -383,24 +425,47 @@ def _build_reward_prompt_text(
     rubric: str,
     reason_first: bool,
     teacher_thinking: bool = True,
+    cot_solution: str | None = None,
+    include_rubric: bool = True,
 ) -> str:
     if reason_first:
         user_message = (
             f"Question: {question}\n\n"
             f"Reference Answer:\n{reference_answer}\n\n"
-            f"Rubric (JSON array):\n{rubric}\n"
-            "\n\nThe reference answer and rubric above are authoritative. "
-            "Briefly explain the key requirements, constraints, and reasoning expectations implied by them. "
-            "Do NOT solve the question yet. Do NOT use <think> tags.\n"
         )
+        if cot_solution:
+            user_message += f"Chain-of-Thought Solution:\n{cot_solution}\n\n"
+        if include_rubric:
+            user_message += (
+                f"Rubric (JSON array):\n{rubric}\n"
+                "\n\nThe reference answer and rubric above are authoritative. "
+                "Briefly explain the key requirements, constraints, and reasoning expectations implied by them. "
+                "Do NOT solve the question yet. Do NOT use <think> tags.\n"
+            )
+        else:
+            user_message += (
+                "\n\nThe reference material above is authoritative. "
+                "Briefly explain the key requirements, constraints, and reasoning expectations implied by it. "
+                "Do NOT solve the question yet. Do NOT use <think> tags.\n"
+            )
     else:
         user_message = (
             f"Question: {question}\n\n"
             f"Reference Answer:\n{reference_answer}\n\n"
-            f"Rubric (JSON array):\n{rubric}\n\n"
-            "Use the rubric and reference answer as guidance.\n"
-            "Please reason step by step, and put your final answer within \\boxed{}."
         )
+        if cot_solution:
+            user_message += f"Chain-of-Thought Solution:\n{cot_solution}\n\n"
+        if include_rubric:
+            user_message += (
+                f"Rubric (JSON array):\n{rubric}\n\n"
+                "Use the rubric and reference answer as guidance.\n"
+                "Please reason step by step, and put your final answer within \\boxed{}."
+            )
+        else:
+            user_message += (
+                "Use the reference material above as guidance.\n"
+                "Please reason step by step, and put your final answer within \\boxed{}."
+            )
     messages = [{"role": "user", "content": user_message}]
     return tokenizer.apply_chat_template(
         messages,
@@ -416,15 +481,25 @@ def _within_reward_prompt_limit(
     max_prompt_tokens: int,
     reason_first: bool,
     teacher_thinking: bool = True,
+    teacher_solution_cot: bool = False,
+    teacher_solution_rubric: bool = True,
 ) -> bool:
     question = _normalize_text(_get_first_present(example, ["question", "problem", "prompt", "instruction", "input"]))
     reference_answer = _normalize_text(
         _get_first_present(example, ["reference_answer", "reference", "answer", "final_answer", "solution"])
     )
-    rubric = _normalize_text(_get_first_present(example, ["rubric", "rubric_list"]))
+    rubric = _normalize_text(_get_first_present(example, ["rubric", "rubric_list", "rubrics"]))
 
-    if question is None or reference_answer is None or rubric is None:
+    if question is None or reference_answer is None:
         return False
+    if teacher_solution_rubric and rubric is None:
+        return False
+
+    cot_solution = None
+    if teacher_solution_cot:
+        sol = example.get("solution")
+        if sol is not None:
+            cot_solution = _normalize_text(sol)
 
     prompt_text = _build_reward_prompt_text(
         tokenizer,
@@ -433,6 +508,8 @@ def _within_reward_prompt_limit(
         rubric,
         reason_first,
         teacher_thinking=teacher_thinking,
+        cot_solution=cot_solution,
+        include_rubric=teacher_solution_rubric,
     )
     prompt_tokens = tokenizer(
         prompt_text,
@@ -856,6 +933,30 @@ class CustomScriptArguments(ScriptArguments):
             "Default True to preserve existing reward-training scripts."
         },
     )
+    teacher_reasoning_thinking: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to enable Qwen3 thinking mode for the reason_first teacher analysis prompt. "
+            "Only used when reason_first=True. Default True to preserve existing reward-training scripts."
+        },
+    )
+    teacher_solution_cot: bool = field(
+        default=False,
+        metadata={
+            "help": "Include the 'solution' column (full CoT reasoning chain) in the teacher's privileged "
+            "context, appended after the short reference answer and before the rubric. "
+            "Only used when the dataset provides a 'solution' column (e.g. openthoughts_math). "
+            "Default False: teacher sees only the short reference answer and rubric."
+        },
+    )
+    teacher_solution_rubric: bool = field(
+        default=True,
+        metadata={
+            "help": "Include the rubric in the teacher's privileged context. "
+            "Default True (existing behavior). Set False to drop the rubric block from the teacher "
+            "prompts, e.g. for CoT-only privileged-context ablations."
+        },
+    )
     rubric_model_path: str = field(
         default="/gpfs/radev/pi/ying_rex/sg2768/OPSD/outputs/qwen3_8b_rubric_fixteacher_temp12_lr2e5_gen4096/checkpoint-1000",
         metadata={
@@ -936,8 +1037,13 @@ if __name__ == "__main__":
             "rarscience": "rar_science",
             "rubric_hub": "rubrichub",
             "rubric-hub": "rubrichub",
+            "rurl": "rurl_science",
+            "rurl_science": "rurl_science",
+            "rurlscience": "rurl_science",
+            "openthoughts": "openthoughts_math",
+            "openthoughts_math": "openthoughts_math",
         },
-        valid_values={"natural_reasoning", "rar_science", "rubrichub"},
+        valid_values={"natural_reasoning", "rar_science", "rubrichub", "rurl_science", "openthoughts_math"},
     )
     script_args.rubric_source = _normalize_source_arg(
         script_args.rubric_source,
@@ -1001,6 +1107,9 @@ if __name__ == "__main__":
     print(f"Rubric Model Path: {script_args.rubric_model_path}")
     print(f"Student Thinking: {script_args.student_thinking}")
     print(f"Teacher Thinking: {script_args.teacher_thinking}")
+    print(f"Teacher Reasoning Thinking: {script_args.teacher_reasoning_thinking}")
+    print(f"Teacher Solution CoT: {script_args.teacher_solution_cot}")
+    print(f"Teacher Solution Rubric: {script_args.teacher_solution_rubric}")
     if script_args.rubric_base_model_name_or_path:
         print(f"Rubric Base Model Override: {script_args.rubric_base_model_name_or_path}")
     print(f"{'='*80}\n")
@@ -1048,6 +1157,9 @@ if __name__ == "__main__":
                 "ema_decay": script_args.ema_decay if script_args.use_ema_teacher else None,
                 "student_thinking": script_args.student_thinking,
                 "teacher_thinking": script_args.teacher_thinking,
+                "teacher_reasoning_thinking": script_args.teacher_reasoning_thinking,
+                "teacher_solution_cot": script_args.teacher_solution_cot,
+                "teacher_solution_rubric": script_args.teacher_solution_rubric,
             },
         )
 
@@ -1288,6 +1400,8 @@ if __name__ == "__main__":
             max_prompt_tokens=script_args.max_reward_prompt_tokens,
             reason_first=script_args.reason_first,
             teacher_thinking=script_args.teacher_thinking,
+            teacher_solution_cot=script_args.teacher_solution_cot,
+            teacher_solution_rubric=script_args.teacher_solution_rubric,
         ),
         desc=f"Filtering reward prompts > {script_args.max_reward_prompt_tokens} tokens",
     )
@@ -1295,6 +1409,11 @@ if __name__ == "__main__":
 
     if "rubric_valid" in train_dataset.column_names:
         train_dataset = train_dataset.remove_columns(["rubric_valid"])
+
+    train_dataset = train_dataset.map(
+        _normalize_reward_example,
+        desc="Normalizing reward dataset columns",
+    )
 
     print(
         f"Reward dataset cleanup: removed {invalid_removed} invalid rubrics and "
@@ -1323,6 +1442,9 @@ if __name__ == "__main__":
         ema_decay=script_args.ema_decay,
         student_thinking=script_args.student_thinking,
         teacher_thinking=script_args.teacher_thinking,
+        teacher_reasoning_thinking=script_args.teacher_reasoning_thinking,
+        teacher_solution_cot=script_args.teacher_solution_cot,
+        teacher_solution_rubric=script_args.teacher_solution_rubric,
     )
 
     if training_args.eval_strategy != "no":

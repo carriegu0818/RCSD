@@ -109,6 +109,7 @@ accelerate launch \
     --rubric_distributed \
     --student_thinking False \
     --teacher_thinking False \
+    --teacher_reasoning_thinking True \
     --jsd_token_clip 0.05 \
     --reason_first \
     --fixed_teacher \
