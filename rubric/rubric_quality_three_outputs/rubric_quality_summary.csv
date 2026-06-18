@@ -1,4 +1,0 @@
-rubric,relevance,correctness,completeness,specificity,non_redundancy,usefulness,overall
-GT,4.954,4.536,4.438,4.836,3.55,4.768,4.513666666666665
-learned,4.456,3.714,3.758,4.148,3.452,4.088,3.935999999999998
-qwen3_8b_direct,4.196,3.402,3.344,3.91,3.25,3.708,3.635000000000001
